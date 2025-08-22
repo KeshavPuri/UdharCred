@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { ethers } from 'ethers';
 import { COLLATERAL_MANAGER_ADDRESS, COLLATERAL_MANAGER_ABI } from '../blockchain/config';
+import axios from 'axios'; // axios ko import karein
 
 function DepositCollateral() {
     const [amount, setAmount] = useState('');
@@ -23,33 +24,48 @@ function DepositCollateral() {
         setMessage('');
 
         try {
-            // Get provider and signer from MetaMask
+            // === REAL TRANSACTION LOGIC ===
             const provider = new ethers.BrowserProvider(window.ethereum);
             const signer = await provider.getSigner();
-
-            // Create a contract instance
             const contract = new ethers.Contract(COLLATERAL_MANAGER_ADDRESS, COLLATERAL_MANAGER_ABI, signer);
-
-            // Convert the amount from Ether to Wei
             const amountInWei = ethers.parseEther(amount);
 
-            // Call the depositCollateral function on the smart contract
             const tx = await contract.depositCollateral({ value: amountInWei });
             
             setMessage('Transaction sent... waiting for confirmation...');
             
-            // Wait for the transaction to be mined
             await tx.wait();
 
+            // === BACKEND KO UPDATE KAREIN ===
+            const token = localStorage.getItem('token');
+            if (token) {
+                console.log("Would now update backend with collateral amount:", amountInWei.toString());
+                // await axios.post(
+                //     'http://localhost:5000/api/onchain/update-collateral', 
+                //     { collateralAmount: amountInWei.toString() }, 
+                //     { headers: { 'x-auth-token': token } }
+                // );
+            }
+            
             setMessage(`Successfully deposited ${amount} ETH!`);
             setAmount('');
-            
-            // Here, you would typically call your backend to notify it about the deposit
-            // For now, we just show a success message.
+            // === END REAL TRANSACTION LOGIC ===
 
         } catch (error) {
             console.error(error);
-            setMessage(error.reason || 'An error occurred during the transaction.');
+            // === IMPROVED ERROR HANDLING ===
+            // Try to get a more specific error message from the error object
+            let errorMessage = 'An error occurred during the transaction.';
+            if (error.reason) {
+                errorMessage = error.reason; // E.g., "user rejected transaction"
+            } else if (error.data && error.data.message) {
+                errorMessage = error.data.message;
+            } else if (error.message) {
+                // This will likely catch the "circuit breaker" message
+                errorMessage = error.message;
+            }
+            setMessage(errorMessage);
+            // === END IMPROVED ERROR HANDLING ===
         } finally {
             setLoading(false);
         }
