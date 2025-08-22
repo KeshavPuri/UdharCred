@@ -1,0 +1,17 @@
+@import "tailwindcss";
+
+/* Add any custom CSS for animations below */
+.cyber-grid {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background-image:
+    linear-gradient(to right, rgba(255, 0, 255, 0.2) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 0, 255, 0.2) 1px, transparent 1px);
+  background-size: 40px 40px;
+  animation: grid-pan 10s linear infinite;
+  z-index: 0;
+  opacity: 0.5;
+}
