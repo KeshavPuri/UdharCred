@@ -1,37 +1,34 @@
 const mongoose = require('mongoose');
+const Schema = mongoose.Schema;
 
-const TransactionSchema = new mongoose.Schema({
-    // Using the original field names your app expects
-    shopkeeperId: { 
-        type: mongoose.Schema.Types.ObjectId, 
-        ref: 'User', 
-        required: true 
+const TransactionSchema = new Schema({
+    customerId: {
+        type: Schema.Types.ObjectId,
+        ref: 'User',
+        required: true
     },
-    customerId: { 
-        type: mongoose.Schema.Types.ObjectId, 
-        ref: 'User', 
-        required: true 
+    shopkeeperId: {
+        type: Schema.Types.ObjectId,
+        ref: 'User',
+        required: true
     },
-    amount: { 
-        type: Number, 
-        required: true 
+    amount: {
+        type: Number,
+        required: true
     },
-    // FIX: Added 'collateral' to the list of allowed types
-    type: { 
-        type: String, 
-        enum: ['credit', 'return', 'collateral'], // Added 'collateral'
-        required: true 
+    type: {
+        type: String,
+        required: true,
+        enum: ['credit', 'return', 'collateral']
     },
-    // Added a status field to track the state of collateral requests
     status: {
         type: String,
-        enum: ['pending', 'approved', 'rejected'],
+        enum: ['pending', 'approved', 'rejected', 'completed', 'refunded'],
         default: 'pending'
-    },
-    createdAt: { 
-        type: Date, 
-        default: Date.now 
     }
+}, { 
+    // Yeh option automatically 'createdAt' aur 'updatedAt' fields add kar dega
+    timestamps: true 
 });
 
 module.exports = mongoose.model('Transaction', TransactionSchema);
