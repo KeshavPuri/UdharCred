@@ -7,8 +7,9 @@ const ChannelState = require('../models/ChannelState');
 const ChannelRequest = require('../models/ChannelRequest');
 const { updateCibilOnNewUdhaar, updateCibilOnReturn } = require('../services/cibilService');
 
-// --- YOUR EXISTING CODE ---
-// (Your original routes are here, unchanged)
+// --- EXISTING ROUTES FROM YOUR PROJECT ---
+
+// Helper function to get or create a channel state
 async function getOrCreateChannelState(shopkeeperId, customerId) {
     const channelId = `${shopkeeperId}-${customerId}`;
     let state = await ChannelState.findOne({ channelId });
@@ -18,6 +19,8 @@ async function getOrCreateChannelState(shopkeeperId, customerId) {
     }
     return state;
 }
+
+// @route   POST /api/transactions/add
 router.post('/add', auth, async (req, res) => {
     if (req.user.role !== 'shopkeeper') {
         return res.status(403).json({ msg: 'Access denied.' });
@@ -34,6 +37,7 @@ router.post('/add', auth, async (req, res) => {
         }
         const customer = await User.findById(customerId);
         if (!customer) return res.status(404).json({ msg: 'Customer not found' });
+
         const newTransaction = new Transaction({
             shopkeeperId: req.user.id,
             customerId,
@@ -41,18 +45,23 @@ router.post('/add', auth, async (req, res) => {
             type: 'credit',
         });
         await newTransaction.save();
+        
         await updateCibilOnNewUdhaar(customerId, amount);
+
         const state = await getOrCreateChannelState(req.user.id, customerId);
         state.latestBalance = newBalance;
         state.latestSignature = signature;
         state.latestNonce = (state.latestNonce || 0) + 1;
         await state.save();
+
         res.json({ msg: 'Transaction added and state signed successfully', state });
     } catch (err) {
         console.error(err.message);
         res.status(500).send('Server Error');
     }
 });
+
+// @route   POST /api/transactions/return
 router.post('/return', auth, async (req, res) => {
     if (req.user.role !== 'shopkeeper') {
         return res.status(403).json({ msg: 'Access denied.' });
@@ -66,34 +75,43 @@ router.post('/return', auth, async (req, res) => {
             type: 'return',
         });
         await newReturn.save();
+
         await updateCibilOnReturn(customerId, amount);
+
         const state = await getOrCreateChannelState(req.user.id, customerId);
         state.latestBalance = newBalance;
         state.latestSignature = signature;
         state.latestNonce = (state.latestNonce || 0) + 1;
         await state.save();
+
         res.json({ msg: 'Return recorded and state signed successfully', state });
     } catch (err) {
         console.error(err.message);
         res.status(500).send('Server Error');
     }
 });
+
+// @route   GET /api/transactions/customer/:id
 router.get('/customer/:id', auth, async (req, res) => {
     try {
         const transactions = await Transaction.find({
             customerId: req.params.id,
             shopkeeperId: req.user.id
         }).sort({ createdAt: -1 });
+
         const balance = transactions.reduce((acc, trans) => {
             if (trans.type === 'credit') return acc + trans.amount;
             return acc - trans.amount;
         }, 0);
+
         res.json({ transactions, balance });
     } catch (err) {
         console.error(err.message);
         res.status(500).send('Server Error');
     }
 });
+
+// @route   GET /api/transactions/my
 router.get('/my', auth, async (req, res) => {
     try {
         const transactions = await Transaction.find({ customerId: req.user.id }).sort({ createdAt: -1 });
@@ -107,6 +125,8 @@ router.get('/my', auth, async (req, res) => {
         res.status(500).send('Server Error');
     }
 });
+
+// @route   GET /api/transactions/state/:customerId
 router.get('/state/:customerId', auth, async (req, res) => {
     if (req.user.role !== 'shopkeeper') {
         return res.status(403).json({ msg: 'Access denied.' });
@@ -120,7 +140,7 @@ router.get('/state/:customerId', auth, async (req, res) => {
             return acc - trans.amount;
         }, 0);
         const state = await getOrCreateChannelState(shopkeeperId, customerId);
-        res.json({
+        res.json({ 
             currentBalance: balance,
             latestNonce: state.latestNonce || 0
         });
@@ -130,9 +150,11 @@ router.get('/state/:customerId', auth, async (req, res) => {
     }
 });
 
-// --- UPDATED ROUTES FOR HANDLING FUND REQUESTS ---
+
+// --- NEW ROUTES FOR STATE CHANNEL & DASHBOARDS ---
 
 // @route   POST api/transactions/create-request
+// @desc    Customer creates a new collateral deposit request
 router.post('/create-request', auth, async (req, res) => {
     try {
         const { recipient, amount } = req.body;
@@ -141,10 +163,9 @@ router.post('/create-request', auth, async (req, res) => {
             return res.status(404).json({ msg: 'Shopkeeper with this wallet address not found.' });
         }
         const newTransaction = new Transaction({
-            // **FIX:** Using the correct field names required by your model
             customerId: req.user.id,
             shopkeeperId: shopkeeper._id,
-            amount,
+            amount: parseFloat(amount),
             type: 'collateral',
             status: 'pending',
         });
@@ -160,6 +181,7 @@ router.post('/create-request', auth, async (req, res) => {
 });
 
 // @route   GET api/transactions/pending-requests
+// @desc    Shopkeeper gets all pending collateral requests
 router.get('/pending-requests', auth, async (req, res) => {
     if (req.user.role !== 'shopkeeper') {
         return res.status(403).json({ msg: 'Access denied. Shopkeepers only.' });
@@ -167,7 +189,8 @@ router.get('/pending-requests', auth, async (req, res) => {
     try {
         const requests = await Transaction.find({ 
             shopkeeperId: req.user.id, 
-            status: 'pending' 
+            status: 'pending',
+            type: 'collateral'
         }).populate('customerId', 'name walletAddress');
         res.json(requests);
     } catch (err) {
@@ -177,6 +200,7 @@ router.get('/pending-requests', auth, async (req, res) => {
 });
 
 // @route   PUT api/transactions/approve/:id
+// @desc    Shopkeeper approves a collateral request
 router.put('/approve/:id', auth, async (req, res) => {
     if (req.user.role !== 'shopkeeper') {
         return res.status(403).json({ msg: 'Access denied. Shopkeepers only.' });
@@ -185,9 +209,10 @@ router.put('/approve/:id', auth, async (req, res) => {
         const transaction = await Transaction.findById(req.params.id);
         if (!transaction) return res.status(404).json({ msg: 'Transaction not found.' });
         if (transaction.shopkeeperId.toString() !== req.user.id) return res.status(401).json({ msg: 'Not authorized.' });
+        
         transaction.status = 'approved';
         await transaction.save();
-        res.json({ msg: 'Transaction approved successfully.', transaction });
+        res.json({ msg: 'Transaction approved successfully. Channel is open.', transaction });
     } catch (err) {
         console.error(err.message);
         res.status(500).send('Server Error');
@@ -195,6 +220,7 @@ router.put('/approve/:id', auth, async (req, res) => {
 });
 
 // @route   PUT api/transactions/reject/:id
+// @desc    Shopkeeper rejects a collateral request
 router.put('/reject/:id', auth, async (req, res) => {
     if (req.user.role !== 'shopkeeper') {
         return res.status(403).json({ msg: 'Access denied. Shopkeepers only.' });
@@ -203,12 +229,47 @@ router.put('/reject/:id', auth, async (req, res) => {
         const transaction = await Transaction.findById(req.params.id);
         if (!transaction) return res.status(404).json({ msg: 'Transaction not found.' });
         if (transaction.shopkeeperId.toString() !== req.user.id) return res.status(401).json({ msg: 'Not authorized.' });
+        
         transaction.status = 'rejected';
         await transaction.save();
+        // TODO: Yahan blockchain par collateral wapis karne ka logic aayega
         res.json({ msg: 'Transaction rejected successfully.', transaction });
-    } catch (err)
- {
+    } catch (err) {
         console.error(err.message);
+        res.status(500).send('Server Error');
+    }
+});
+
+// @route   GET /api/transactions/customer-summary
+// @desc    Get customer's complete financial summary for their dashboard
+router.get('/customer-summary', auth, async (req, res) => {
+    try {
+        if (req.user.role !== 'customer') {
+            return res.status(403).json({ msg: 'Access denied. Customers only.' });
+        }
+        const customerId = req.user.id;
+        const transactions = await Transaction.find({ customerId });
+
+        const udhaarLimit = transactions
+            .filter(t => t.type === 'collateral' && t.status === 'approved')
+            .reduce((sum, t) => sum + t.amount, 0);
+
+        const totalUdhaar = transactions
+            .filter(t => t.type === 'credit')
+            .reduce((sum, t) => sum + t.amount, 0);
+
+        const pendingCollateralTxs = transactions.filter(t => t.type === 'collateral' && t.status === 'pending');
+        const pendingRequestCount = pendingCollateralTxs.length;
+        const pendingCollateralAmount = pendingCollateralTxs.reduce((sum, t) => sum + t.amount, 0);
+
+        res.json({
+            udhaarLimit,
+            totalUdhaar,
+            pendingRequestCount,
+            pendingCollateralAmount
+        });
+    } catch (err) {
+        console.error("Error fetching customer summary:", err.message);
         res.status(500).send('Server Error');
     }
 });
