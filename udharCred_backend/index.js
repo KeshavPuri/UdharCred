@@ -22,10 +22,13 @@ const authRoutes = require('./routes/auth');
 const transactionRoutes = require('./routes/transactions');
 const paymentRoutes = require('./routes/payment');
 const onchainRoutes = require('./routes/onchain');
+const userRoutes = require('./routes/users');
 const requestRoutes = require('./routes/requests');
 const cibilRoutes = require('./routes/cibil');
 
 // Use all the routes
+
+app.use('/api/users', userRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/transactions', transactionRoutes);
 app.use('/api/payment', paymentRoutes);
