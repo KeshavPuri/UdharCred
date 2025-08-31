@@ -15,7 +15,7 @@ async function getOrCreateChannelState(shopkeeperId, customerId) {
         state = new ChannelState({ shopkeeperId, customerId, channelId });
         await state.save();
     }
-    return state;           
+    return state;         
 }
 
 // @route   POST /api/transactions/add
@@ -102,7 +102,7 @@ router.get('/customer/:id', auth, async (req, res) => {
             if (trans.type === 'credit') return acc + trans.amount;
             return acc - trans.amount;
         }, 0);
- 
+
         res.json({ transactions, balance });
     } catch (err) {
         console.error(err.message);
@@ -148,5 +148,44 @@ router.get('/state/:customerId', auth, async (req, res) => {
         res.status(500).send('Server Error');
     }
 });
+
+// @route   POST api/transactions/create-request
+// @desc    Customer creates a new fund request
+// @access  Private
+router.post('/create-request', auth, async (req, res) => {
+    try {
+        // Frontend 'recipient' ko bhejega, jo shopkeeper ka wallet address hai
+        const { recipient, amount } = req.body;
+
+        // FIX: Wallet address ko case-insensitive search karein using regex
+        const shopkeeper = await User.findOne({ 
+            walletAddress: new RegExp('^' + recipient + '$', 'i'), 
+            role: 'shopkeeper' 
+        });
+
+        if (!shopkeeper) {
+            return res.status(404).json({ msg: 'Shopkeeper with this wallet address not found.' });
+        }
+
+        // Ek nayi transaction banayein
+        const newTransaction = new Transaction({
+            customerId: req.user.id, // 'auth' middleware se customer ki user ID milegi
+            shopkeeperId: shopkeeper._id, // Found shopkeeper's ID
+            amount,
+            status: 'pending', // Initial status pending hoga
+            type: 'credit', // Isse credit transaction ki tarah treat karein
+        });
+
+        // Transaction ko database mein save karein
+        const transaction = await newTransaction.save();
+
+        res.json(transaction); // Success response
+
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).send('Server Error');
+    }
+});
+
 
 module.exports = router;

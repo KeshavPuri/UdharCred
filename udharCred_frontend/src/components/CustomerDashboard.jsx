@@ -1,6 +1,7 @@
+
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import DepositCollateral from './DepositCollateral.jsx'; // Import the new component
+import RequestFund from './RequestFund.jsx'; // DepositCollateral ki jagah RequestFund import karein
 
 function CustomerDashboard({ user }) {
     const [balance, setBalance] = useState(0);
@@ -45,10 +46,9 @@ function CustomerDashboard({ user }) {
                 </div>
             </div>
             
-            {/* New Section for Collateral */}
+            {/* Yahan DepositCollateral component ko RequestFund se replace kar diya hai */}
             <div>
-                <h2 className="text-2xl font-bold text-fuchsia-400 mb-4">Manage Collateral</h2>
-                <DepositCollateral />
+                <RequestFund />
             </div>
         </div>
     );
