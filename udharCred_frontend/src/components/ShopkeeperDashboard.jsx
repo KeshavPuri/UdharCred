@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import PendingRequests from './PendingRequests';
 
 function ShopkeeperDashboard({ user }) {
     const [requests, setRequests] = useState([]);
@@ -64,6 +65,7 @@ function ShopkeeperDashboard({ user }) {
                 </div>
             </div>
             {/* We will add more sections like 'My Customers' here later */}
+             <PendingRequests />
         </div>
     );
 }

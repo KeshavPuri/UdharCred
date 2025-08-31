@@ -1,12 +1,8 @@
 import React, { useState } from 'react';
 import axios from 'axios';
 import { ethers } from 'ethers';
-
-// TODO: Yeh aapke smart contract ka ABI aur address hoga
-// Inhe apni actual contract details se replace karein
-const contractABI = [ /* Your Contract ABI here */ ];
-const contractAddress = "YOUR_CONTRACT_ADDRESS";
-
+// **FIX 1:** Aapki config.js file se ABI aur Address import karein
+import { COLLATERAL_MANAGER_ADDRESS, COLLATERAL_MANAGER_ABI } from '../blockchain/config.js';
 
 const RequestFund = () => {
   const [shopkeeperAddress, setShopkeeperAddress] = useState('');
@@ -16,57 +12,61 @@ const RequestFund = () => {
 
   const handleRequestSubmit = async (e) => {
     e.preventDefault();
-    if (!shopkeeperAddress || !amount) {
-        setMessage('Please fill all fields.');
+    setLoading(true);
+    setMessage('');
+
+    if (!window.ethereum) {
+        alert("MetaMask is not installed. Please install it to use this feature.");
+        setLoading(false);
         return;
     }
-    setLoading(true);
-    setMessage('Initiating transaction...');
 
     try {
-        // Step 1: MetaMask se connect karein
-        if (typeof window.ethereum === 'undefined') {
-            throw new Error("MetaMask is not installed!");
-        }
-        
-        // FIX 1: ethers v6 mein 'Web3Provider' ki jagah 'BrowserProvider' use hota hai
-        const provider = new ethers.BrowserProvider(window.ethereum);
-        
-        // Account access request karein aur signer get karein
-        const signer = await provider.getSigner();
-
-        // Step 2: Backend ko request bhejein taaki transaction record ho
+        // Step 1: Backend API call to create a pending transaction record
         const token = localStorage.getItem('token');
         const config = { headers: { 'x-auth-token': token } };
-        const body = { recipient: shopkeeperAddress, amount: parseFloat(amount), status: 'pending' };
-
-        // Yeh API call aapke backend mein request create karegi
+        const body = { recipient: shopkeeperAddress, amount: parseFloat(amount) };
+        
         await axios.post('http://localhost:5000/api/transactions/create-request', body, config);
-        setMessage('Request sent to backend. Now processing blockchain transaction...');
         
-        // Step 3: Smart contract se interact karke fund deposit karein
-        const udharCredContract = new ethers.Contract(contractAddress, contractABI, signer);
-        
-        // FIX 2: ethers v6 mein 'utils.parseEther' ki jagah 'ethers.parseEther' use hota hai
-        const amountInWei = ethers.parseEther(amount);
+        setMessage("Request sent to backend. Now processing blockchain transaction...");
 
-        // Contract ke 'deposit' function ko call karein
-        const transaction = await udharCredContract.deposit(shopkeeperAddress, { value: amountInWei });
-        
-        setMessage('Transaction is processing... please wait for confirmation.');
-        await transaction.wait(); // Transaction ke complete hone ka wait karein
+        // Step 2: Connect to MetaMask and the blockchain
+        const provider = new ethers.BrowserProvider(window.ethereum);
+        await provider.send("eth_requestAccounts", []);
+        const signer = await provider.getSigner();
 
-        setMessage('Fund request sent and collateral deposited successfully!');
-        console.log("Transaction successful:", transaction);
+        // **FIX 2:** Sahi address aur ABI ka istemal karein
+        const udharCredContract = new ethers.Contract(COLLATERAL_MANAGER_ADDRESS, COLLATERAL_MANAGER_ABI, signer);
+
+        // Step 3: Call the `depositCollateral` function on the smart contract
+        const valueInWei = ethers.parseEther(amount);
         
-        // Form clear karein
+        // **FIX 3:** `depositCollateral` ko bina kisi argument ke call karein (aapke ABI ke anusaar)
+        const transaction = await udharCredContract.depositCollateral({
+            value: valueInWei,
+        });
+
+        // Step 4: Wait for the transaction to be mined
+        await transaction.wait();
+        
+        setMessage('Success! Your funds have been deposited to the channel.');
+        
+        // Clear form after successful transaction
         setShopkeeperAddress('');
         setAmount('');
 
     } catch (error) {
         console.error("Transaction failed:", error);
-        const errorMessage = error.response?.data?.msg || error.message || "An error occurred.";
-        setMessage(`Error: ${errorMessage}`);
+        let errorMessage = "An error occurred.";
+        if (error.response) {
+            errorMessage = `Backend Error: ${error.response.data.msg || 'Request failed.'}`;
+        } else if (error.code === 'ACTION_REJECTED') {
+            errorMessage = "Transaction was rejected in MetaMask.";
+        } else if (error.reason) {
+            errorMessage = `Smart Contract Error: ${error.reason}`;
+        }
+        setMessage(errorMessage);
     } finally {
         setLoading(false);
     }
@@ -107,12 +107,12 @@ const RequestFund = () => {
             <button
                 type="submit"
                 disabled={loading}
-                className="w-full bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-4 rounded-lg transition duration-300 disabled:bg-gray-500"
+                className="w-full bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-4 rounded-lg transition duration-300 disabled:bg-gray-500 disabled:cursor-not-allowed"
             >
                 {loading ? 'Processing...' : 'Send Request & Deposit'}
             </button>
-            {message && <p className="text-sm text-center text-gray-300 mt-4">{message}</p>}
         </form>
+        {message && <p className="mt-4 text-sm text-center text-gray-300">{message}</p>}
     </div>
   );
 };
