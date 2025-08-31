@@ -7,7 +7,7 @@ const ChannelState = require('../models/ChannelState');
 const ChannelRequest = require('../models/ChannelRequest');
 const { updateCibilOnNewUdhaar, updateCibilOnReturn } = require('../services/cibilService');
 
-const ETH_TO_INR_RATE = 295000; // Example rate, consider using a dynamic API for this
+const ETH_TO_INR_RATE = 295000;
 
 // --- ORIGINAL ROUTES ---
 
@@ -138,7 +138,7 @@ router.get('/state/:customerId', auth, async (req, res) => {
 });
 
 
-// --- NEW ROUTES FOR FUND REQUESTS & DASHBOARDS ---
+// --- NEW ROUTES FOR FUND REQUESTS, DASHBOARDS, AND OFF-CHAIN LOGIC ---
 
 router.post('/create-request', auth, async (req, res) => {
     try {
@@ -297,7 +297,7 @@ router.get('/my-rejected-requests', auth, async (req, res) => {
 router.post('/add-offchain', auth, async (req, res) => {
     if (req.user.role !== 'shopkeeper') return res.status(403).json({ msg: 'Access denied.' });
     
-    const { customerId, amount } = req.body;
+    const { customerId, amount, description } = req.body;
     const numericAmount = parseFloat(amount);
     
     try {
@@ -322,6 +322,7 @@ router.post('/add-offchain', auth, async (req, res) => {
             customerId,
             shopkeeperId: req.user.id,
             amount: numericAmount,
+            description: description || 'N/A',
             type: 'credit',
             status: 'completed'
         });
@@ -334,50 +335,41 @@ router.post('/add-offchain', auth, async (req, res) => {
     }
 });
 
-router.put('/mark-refunded/:id', auth, async (req, res) => {
-    console.log(`--- Received request to mark transaction ${req.params.id} as refunded ---`);
-    
-    if (req.user.role !== 'customer') {
-        console.log(`[FAIL] Access denied. User role is '${req.user.role}', not 'customer'.`);
+router.get('/customer-history/:customerId', auth, async (req, res) => {
+    if (req.user.role !== 'shopkeeper') {
         return res.status(403).json({ msg: 'Access denied.' });
     }
-    
     try {
-        console.log(`[1/5] Finding transaction by ID: ${req.params.id}`);
-        const transaction = await Transaction.findById(req.params.id);
-        
-        if (!transaction) {
-            console.log(`[FAIL] Transaction with ID ${req.params.id} not found in database.`);
-            return res.status(404).json({ msg: 'Transaction not found.' });
-        }
-        console.log('[2/5] Transaction found.');
+        const transactions = await Transaction.find({
+            shopkeeperId: req.user.id,
+            customerId: req.params.customerId,
+            type: 'credit'
+        }).sort({ createdAt: -1 }); 
 
-        console.log(`[3/5] Authorizing... DB customer ID: ${transaction.customerId.toString()}, Token user ID: ${req.user.id}`);
-        if (transaction.customerId.toString() !== req.user.id) {
-            console.log(`[FAIL] Authorization failed. IDs do not match.`);
-            return res.status(401).json({ msg: 'Not authorized.' });
-        }
-        console.log(`[3/5] Authorization successful.`);
-
-        console.log(`[4/5] Checking status... Current status is '${transaction.status}'`);
-        if (transaction.status !== 'rejected') {
-            console.log(`[FAIL] Status check failed. Expected 'rejected', but got '${transaction.status}'.`);
-            return res.status(400).json({ msg: 'Only rejected transactions can be marked as refunded.' });
-        }
-        console.log(`[4/5] Status check successful.`);
-
-        transaction.status = 'refunded';
-        await transaction.save();
-        console.log(`[5/5] Successfully saved transaction with new status 'refunded'.`);
-        
-        res.json({ msg: 'Transaction marked as refunded.' });
-
+        res.json(transactions);
     } catch (err) {
-        console.error("--- FATAL ERROR in /mark-refunded ---");
-        console.error(err); // Poora error object print karein
+        console.error("Error fetching customer history:", err.message);
         res.status(500).send('Server Error');
     }
 });
 
+router.put('/mark-refunded/:id', auth, async (req, res) => {
+    if (req.user.role !== 'customer') return res.status(403).json({ msg: 'Access denied.' });
+    try {
+        const transaction = await Transaction.findById(req.params.id);
+        if (!transaction || transaction.customerId.toString() !== req.user.id) {
+            return res.status(404).json({ msg: 'Transaction not found or unauthorized.' });
+        }
+        if (transaction.status !== 'rejected') {
+            return res.status(400).json({ msg: 'Only rejected transactions can be refunded.' });
+        }
+        transaction.status = 'refunded';
+        await transaction.save();
+        res.json({ msg: 'Transaction marked as refunded.' });
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).send('Server Error');
+    }
+});
 
 module.exports = router;

@@ -16,6 +16,10 @@ const TransactionSchema = new Schema({
         type: Number,
         required: true
     },
+    description: {
+        type: String,
+        default: '' // Udhaar ke saamaan ki detail ke liye
+    },
     type: {
         type: String,
         required: true,
@@ -27,7 +31,7 @@ const TransactionSchema = new Schema({
         default: 'pending'
     }
 }, { 
-    // Yeh option automatically 'createdAt' aur 'updatedAt' fields add kar dega
+    // Yeh option automatically 'createdAt' aur 'updatedAt' fields add kar deta hai
     timestamps: true 
 });
 
