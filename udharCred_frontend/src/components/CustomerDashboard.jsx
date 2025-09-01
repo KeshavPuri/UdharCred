@@ -148,7 +148,8 @@ const PendingUdhaarRequests = ({ onUpdate, refreshKey }) => {
             const token = localStorage.getItem('token');
             const config = { headers: { 'x-auth-token': token } };
             
-            const stateRes = await axios.get(`http://localhost:5000/api/channel-state/${tx.shopkeeperId._id}/${tx.customerId}`, config);
+            // **FINAL FIX**: URL ko theek kiya gaya hai, ab ismein '/transactions/' shaamil hai
+            const stateRes = await axios.get(`http://localhost:5000/api/transactions/channel-state/${tx.shopkeeperId._id}/${tx.customerId}`, config);
             const { latestBalance, latestNonce } = stateRes.data;
 
             const newBalance = (latestBalance || 0) + tx.amount;
@@ -202,7 +203,6 @@ const UnusedCollateralManager = ({ onUpdate, refreshKey }) => {
         const fetchOpenChannels = async () => {
             const token = localStorage.getItem('token');
             const config = { headers: { 'x-auth-token': token } };
-            // **FIX**: Sahi URL ka istemal
             const res = await axios.get('http://localhost:5000/api/transactions/my-open-channels', config);
             setOpenChannels(res.data);
         };
@@ -232,7 +232,6 @@ const TransactionHistory = ({ refreshKey }) => {
         const fetchHistory = async () => {
             const token = localStorage.getItem('token');
             const config = { headers: { 'x-auth-token': token } };
-            // **FIX**: Sahi URL ka istemal
             const res = await axios.get('http://localhost:5000/api/transactions/my-history', config);
             setHistory(res.data);
         };

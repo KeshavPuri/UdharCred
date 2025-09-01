@@ -238,12 +238,16 @@ router.get('/pending-udhaar', auth, async (req, res) => {
         const pending = await Transaction.find({
             customerId: req.user.id,
             status: 'pending_signature'
-        }).populate('shopkeeperId', 'username');
+        })
+        // **FIX**: Ab yeh 'username' ke saath 'walletAddress' bhi fetch karega
+        .populate('shopkeeperId', 'username walletAddress');
         res.json(pending);
     } catch (err) {
+        console.error("Error fetching pending udhaar:", err.message);
         res.status(500).send('Server Error');
     }
 });
+
 
 
 // --- REFUND AND WITHDRAWAL ROUTES ---
