@@ -169,7 +169,9 @@ router.get('/pending-requests', auth, async (req, res) => {
             shopkeeperId: req.user.id,
             status: 'pending',
             type: 'collateral'
-        }).populate('customerId', 'name walletAddress');
+        })
+        // **FINAL FIX**: 'name' ki jagah 'username' fetch karein
+        .populate('customerId', 'username walletAddress');
         res.json(requests);
     } catch (err) {
         console.error(err.message);
@@ -246,21 +248,26 @@ router.get('/shopkeeper-summary', auth, async (req, res) => {
             shopkeeperId: req.user.id,
             type: 'collateral',
             status: 'approved'
-        }).populate('customerId', 'name walletAddress');
+        })
+        // **FINAL FIX**: 'name' ki jagah 'username' fetch karein
+        .populate('customerId', 'username walletAddress');
 
         const customerData = {};
         for (const tx of approvedChannels) {
-            const custId = tx.customerId._id.toString();
-            if (!customerData[custId]) {
-                customerData[custId] = {
-                    id: custId,
-                    name: tx.customerId.name,
-                    walletAddress: tx.customerId.walletAddress,
-                    udhaarLimit: 0,
-                    totalUdhaar: 0
-                };
+            if (tx.customerId) { // Safety check
+                const custId = tx.customerId._id.toString();
+                if (!customerData[custId]) {
+                    customerData[custId] = {
+                        id: custId,
+                        // **FINAL FIX**: 'name' ki jagah 'username' ka istemal karein
+                        username: tx.customerId.username,
+                        walletAddress: tx.customerId.walletAddress,
+                        udhaarLimit: 0,
+                        totalUdhaar: 0
+                    };
+                }
+                customerData[custId].udhaarLimit += tx.amount;
             }
-            customerData[custId].udhaarLimit += tx.amount;
         }
 
         const creditTxs = await Transaction.find({
@@ -270,7 +277,10 @@ router.get('/shopkeeper-summary', auth, async (req, res) => {
         });
 
         for (const tx of creditTxs) {
-            customerData[tx.customerId.toString()].totalUdhaar += tx.amount;
+            const custId = tx.customerId.toString();
+            if (customerData[custId]) {
+                customerData[custId].totalUdhaar += tx.amount;
+            }
         }
         
         res.json(Object.values(customerData));
@@ -286,7 +296,9 @@ router.get('/my-rejected-requests', auth, async (req, res) => {
             customerId: req.user.id,
             status: 'rejected',
             type: 'collateral'
-        }).populate('shopkeeperId', 'name');
+        })
+        // **FINAL FIX**: 'name' ki jagah 'username' fetch karein
+        .populate('shopkeeperId', 'username');
         res.json(requests);
     } catch (err) {
         console.error(err.message);
@@ -373,3 +385,4 @@ router.put('/mark-refunded/:id', auth, async (req, res) => {
 });
 
 module.exports = router;
+

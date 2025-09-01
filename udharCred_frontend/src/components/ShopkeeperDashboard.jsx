@@ -57,8 +57,8 @@ const PendingRequestsView = ({ onUpdateRequest }) => {
         <div className="space-y-3">
             {requests.map(req => (
                 <div key={req._id} className="bg-gray-800 p-4 rounded-lg">
-                    {/* **FIX**: Ab yahan customer ka naam dikhega */}
-                    <p className="font-bold text-white">{req.customerId?.name || 'Unnamed Customer'}</p>
+                    {/* **FIX**: Ab yahan customer ka 'username' dikhega */}
+                    <p className="font-bold text-white">{req.customerId?.username || 'Unnamed Customer'}</p>
                     <p className="text-xs text-gray-500 break-all mb-2">{req.customerId?.walletAddress}</p>
                     <div className="flex justify-between items-center">
                         <p className="text-cyan-400 font-semibold">{req.amount} ETH ({formatEthToINR(req.amount)})</p>
@@ -94,7 +94,8 @@ const AddUdhaarForm = ({ customer, onNewUdhaar }) => {
             const config = { headers: { 'x-auth-token': token } };
             const body = { customerId: customer.id, amount: parseFloat(amount), description };
             await axios.post('http://localhost:5000/api/transactions/add-offchain', body, config);
-            alert(`Successfully added udhaar for ${customer.name || 'this customer'}.`);
+            // **FIX**: 'name' ki jagah 'username' ka istemal karein
+            alert(`Successfully added udhaar for ${customer.username || 'this customer'}.`);
             onNewUdhaar();
             setAmount('');
             setDescription('');
@@ -158,7 +159,8 @@ const CustomerDetailView = ({ customer, onBack, onNewUdhaar }) => {
     return (
         <div className="bg-gray-900/50 p-6 rounded-lg border border-gray-700">
             <button onClick={onBack} className="text-cyan-400 hover:text-cyan-300 mb-4">&larr; Back to Customer List</button>
-            <h3 className="text-2xl font-bold text-fuchsia-400">{customer.name || 'Unnamed Customer'}</h3>
+            {/* **FIX**: 'name' ki jagah 'username' ka istemal karein */}
+            <h3 className="text-2xl font-bold text-fuchsia-400">{customer.username || 'Unnamed Customer'}</h3>
             <p className="text-sm text-gray-500 break-all">{customer.walletAddress}</p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
                 <div className="bg-gray-800 p-4 rounded-lg">
@@ -220,10 +222,11 @@ function ShopkeeperDashboard() {
     
     const filteredCustomers = useMemo(() =>
         customers.filter(c => {
-            const name = c.name || '';
+            // **FIX**: 'name' ki jagah 'username' par search karein
+            const username = c.username || '';
             const address = c.walletAddress || '';
             const search = searchTerm.toLowerCase();
-            return name.toLowerCase().includes(search) || address.toLowerCase().includes(search);
+            return username.toLowerCase().includes(search) || address.toLowerCase().includes(search);
         }),
         [customers, searchTerm]
     );
@@ -251,7 +254,7 @@ function ShopkeeperDashboard() {
                         onNewUdhaar={handleRefreshData}
                     />
                 ) : (
-                    <div className="bg-gray-900/50 p-6 rounded-lg border border-gray-700">
+                    <div className="bg-gray-900/ ৫০ p-6 rounded-lg border border-gray-700">
                         <input
                             type="text"
                             placeholder="Search by name or wallet address..."
@@ -262,7 +265,8 @@ function ShopkeeperDashboard() {
                         <div className="space-y-2 max-h-80 overflow-y-auto pr-2">
                             {filteredCustomers.length > 0 ? filteredCustomers.map(customer => (
                                 <div key={customer.id} onClick={() => setSelectedCustomer(customer)} className="p-4 bg-gray-800 rounded-lg hover:bg-gray-700 cursor-pointer">
-                                    <p className="font-bold text-white">{customer.name || 'Unnamed Customer'}</p>
+                                    {/* **FIX**: 'name' ki jagah 'username' ka istemal karein */}
+                                    <p className="font-bold text-white">{customer.username || 'Unnamed Customer'}</p>
                                     <p className="text-xs text-gray-500 break-all">{customer.walletAddress}</p>
                                     <p className="text-sm text-gray-400 mt-1">Udhaar: {formatINR(customer.totalUdhaar)} / {formatEthToINR(customer.udhaarLimit)}</p>
                                 </div>

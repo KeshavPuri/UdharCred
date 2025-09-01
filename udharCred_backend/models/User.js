@@ -1,26 +1,30 @@
-
 const mongoose = require('mongoose');
+const Schema = mongoose.Schema;
 
-const UserSchema = new mongoose.Schema({
+// Yeh aapka final User Schema hai, jo Mongoose ke best practices ko follow karta hai.
+const UserSchema = new Schema({
+    // **FINAL FIX**: Yeh sunishchit karega ki database 'username' ko hi save aur expect karega.
     username: {
         type: String,
         required: true,
-        unique: true,
+        unique: true
     },
     password: {
         type: String,
-        required: true,
+        required: true
     },
     role: {
         type: String,
-        enum: ['shopkeeper', 'customer'],
-        required: true,
+        enum: ['customer', 'shopkeeper'],
+        required: true
     },
     walletAddress: {
         type: String,
         required: true,
-        unique: true,
+        unique: true
     }
-}, { timestamps: true }); // This automatically adds 'createdAt' and 'updatedAt' fields
+}, { 
+    timestamps: true 
+});
 
 module.exports = mongoose.model('User', UserSchema);
