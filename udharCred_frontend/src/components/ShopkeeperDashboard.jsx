@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
-import PendingRequests from './PendingRequests';
 
 const ETH_TO_INR_RATE = 295000;
 
@@ -11,6 +10,65 @@ const formatEthToINR = (amountInEth) => {
 };
 const formatINR = (amountInINR) => {
     return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 0 }).format(amountInINR);
+};
+
+// --- Sub-component: Pending Requests Dikhane ke liye ---
+const PendingRequestsView = ({ onUpdateRequest }) => {
+    const [requests, setRequests] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState('');
+
+    useEffect(() => {
+        const fetchRequests = async () => {
+            setLoading(true);
+            try {
+                const token = localStorage.getItem('token');
+                const config = { headers: { 'x-auth-token': token } };
+                const res = await axios.get('http://localhost:5000/api/transactions/pending-requests', config);
+                setRequests(res.data);
+            } catch (err) {
+                setError('Could not fetch pending requests.');
+            } finally {
+                setLoading(false);
+            }
+        };
+        fetchRequests();
+    }, [onUpdateRequest]);
+
+    const handleRequest = async (id, status) => {
+        try {
+            const token = localStorage.getItem('token');
+            const config = { headers: { 'x-auth-token': token } };
+            await axios.put(`http://localhost:5000/api/transactions/${status}/${id}`, {}, config);
+            alert(`Request has been ${status}.`);
+            onUpdateRequest(); // Dashboard ko refresh karein
+        } catch (err) {
+            alert(`Failed to ${status} request.`);
+        }
+    };
+
+    if (loading) return <p className="text-gray-400">Loading requests...</p>;
+    if (error) return <p className="text-red-500">{error}</p>;
+    if (requests.length === 0) return <p className="text-gray-500">No pending requests.</p>;
+
+    return (
+        <div className="space-y-3">
+            {requests.map(req => (
+                <div key={req._id} className="bg-gray-800 p-4 rounded-lg">
+                    {/* **FIX**: Ab yahan customer ka naam dikhega */}
+                    <p className="font-bold text-white">{req.customerId?.name || 'Unnamed Customer'}</p>
+                    <p className="text-xs text-gray-500 break-all mb-2">{req.customerId?.walletAddress}</p>
+                    <div className="flex justify-between items-center">
+                        <p className="text-cyan-400 font-semibold">{req.amount} ETH ({formatEthToINR(req.amount)})</p>
+                        <div className="flex gap-2">
+                            <button onClick={() => handleRequest(req._id, 'approve')} className="bg-green-600 hover:bg-green-700 text-white font-bold py-1 px-3 rounded">Approve</button>
+                            <button onClick={() => handleRequest(req._id, 'reject')} className="bg-red-600 hover:bg-red-700 text-white font-bold py-1 px-3 rounded">Reject</button>
+                        </div>
+                    </div>
+                </div>
+            ))}
+        </div>
+    );
 };
 
 
@@ -33,11 +91,9 @@ const AddUdhaarForm = ({ customer, onNewUdhaar }) => {
             const token = localStorage.getItem('token');
             const config = { headers: { 'x-auth-token': token } };
             const body = { customerId: customer.id, amount: parseFloat(amount), description };
-
             await axios.post('http://localhost:5000/api/transactions/add-offchain', body, config);
-            
             alert(`Successfully added udhaar for ${customer.name}.`);
-            onNewUdhaar(); // Refresh parent component
+            onNewUdhaar();
             setAmount('');
             setDescription('');
         } catch (err) {
@@ -93,16 +149,15 @@ const CustomerDetailView = ({ customer, onBack, onNewUdhaar }) => {
     }, [customer.id, refreshTrigger]);
 
     const handleUdhaarAdded = () => {
-        onNewUdhaar(); // Refresh parent list
-        setRefreshTrigger(prev => prev + 1); // Refresh this component's history
+        onNewUdhaar();
+        setRefreshTrigger(prev => prev + 1);
     };
 
     return (
         <div className="bg-gray-900/50 p-6 rounded-lg border border-gray-700">
             <button onClick={onBack} className="text-cyan-400 hover:text-cyan-300 mb-4">&larr; Back to Customer List</button>
-            <h3 className="text-2xl font-bold text-fuchsia-400">{customer.name}</h3>
+            <h3 className="text-2xl font-bold text-fuchsia-400">{customer.name || 'Unnamed Customer'}</h3>
             <p className="text-sm text-gray-500 break-all">{customer.walletAddress}</p>
-            
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
                 <div className="bg-gray-800 p-4 rounded-lg">
                     <h4 className="text-gray-400">Udhaar Limit</h4>
@@ -113,9 +168,7 @@ const CustomerDetailView = ({ customer, onBack, onNewUdhaar }) => {
                     <p className="text-2xl font-bold text-fuchsia-400">{formatINR(customer.totalUdhaar)}</p>
                 </div>
             </div>
-
             <AddUdhaarForm customer={customer} onNewUdhaar={handleUdhaarAdded} />
-
             <div className="mt-6">
                 <h4 className="text-lg font-semibold text-cyan-400 mb-2">Udhaar History</h4>
                 {loadingHistory ? <p className="text-gray-400">Loading history...</p> : (
@@ -162,25 +215,20 @@ function ShopkeeperDashboard() {
         };
         fetchDashboardData();
     }, [refreshKey]);
-
-    const filteredCustomers = useMemo(() => 
+    
+    const filteredCustomers = useMemo(() =>
         customers.filter(c => {
             const name = c.name || '';
             const address = c.walletAddress || '';
-            return name.toLowerCase().includes(searchTerm.toLowerCase()) || address.toLowerCase().includes(searchTerm.toLowerCase());
-        }), 
+            const search = searchTerm.toLowerCase();
+            return name.toLowerCase().includes(search) || address.toLowerCase().includes(search);
+        }),
         [customers, searchTerm]
     );
     
     const handleRefreshData = () => {
         setRefreshKey(k => k + 1);
     };
-    
-    const handleNewUdhaar = () => {
-        // This will refresh the main customer list
-        handleRefreshData();
-        // We will also need to refresh the selected customer's data, which is handled inside CustomerDetailView
-    }
 
     if (loading) return <p className="text-center text-gray-400">Loading shopkeeper dashboard...</p>;
     if (error) return <p className="text-center text-red-500">{error}</p>;
@@ -188,19 +236,18 @@ function ShopkeeperDashboard() {
     return (
         <div className="space-y-8">
             <h2 className="text-3xl font-bold text-cyan-400">Shopkeeper Dashboard</h2>
-            
             <div>
                 <h3 className="text-2xl font-semibold text-fuchsia-400 mb-4">Pending Collateral Requests</h3>
-                <PendingRequests onUpdateRequest={handleRefreshData} />
+                {/* Yahan naya component istemal kiya gaya hai */}
+                <PendingRequestsView onUpdateRequest={handleRefreshData} />
             </div>
-
             <div>
                  <h3 className="text-2xl font-semibold text-fuchsia-400 mb-4">Your Customers</h3>
                 {selectedCustomer ? (
                     <CustomerDetailView 
-                        customer={customers.find(c => c.id === selectedCustomer.id)} // Pass latest customer data
+                        customer={customers.find(c => c.id === selectedCustomer.id)}
                         onBack={() => setSelectedCustomer(null)}
-                        onNewUdhaar={handleNewUdhaar}
+                        onNewUdhaar={handleRefreshData}
                     />
                 ) : (
                     <div className="bg-gray-900/50 p-6 rounded-lg border border-gray-700">
@@ -214,10 +261,11 @@ function ShopkeeperDashboard() {
                         <div className="space-y-2 max-h-80 overflow-y-auto pr-2">
                             {filteredCustomers.length > 0 ? filteredCustomers.map(customer => (
                                 <div key={customer.id} onClick={() => setSelectedCustomer(customer)} className="p-4 bg-gray-800 rounded-lg hover:bg-gray-700 cursor-pointer">
-                                    <p className="font-bold text-white">{customer.name}</p>
-                                    <p className="text-sm text-gray-400">Udhaar: {formatINR(customer.totalUdhaar)} / {formatEthToINR(customer.udhaarLimit)}</p>
+                                    <p className="font-bold text-white">{customer.name || 'Unnamed Customer'}</p>
+                                    <p className="text-xs text-gray-500 break-all">{customer.walletAddress}</p>
+                                    <p className="text-sm text-gray-400 mt-1">Udhaar: {formatINR(customer.totalUdhaar)} / {formatEthToINR(customer.udhaarLimit)}</p>
                                 </div>
-                            )) : <p className="text-gray-500 text-center">No customers found.</p>}
+                            )) : <p className="text-gray-500 text-center">{customers.length > 0 ? "No customer found with that name/address." : "No customers with open channels yet."}</p>}
                         </div>
                     </div>
                 )}
