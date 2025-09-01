@@ -17,6 +17,7 @@ const PendingRequestsView = ({ onUpdateRequest }) => {
     const [requests, setRequests] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
+    const [refreshKey, setRefreshKey] = useState(0);
 
     useEffect(() => {
         const fetchRequests = async () => {
@@ -33,7 +34,7 @@ const PendingRequestsView = ({ onUpdateRequest }) => {
             }
         };
         fetchRequests();
-    }, [onUpdateRequest]);
+    }, [refreshKey]);
 
     const handleRequest = async (id, status) => {
         try {
@@ -42,6 +43,7 @@ const PendingRequestsView = ({ onUpdateRequest }) => {
             await axios.put(`http://localhost:5000/api/transactions/${status}/${id}`, {}, config);
             alert(`Request has been ${status}.`);
             onUpdateRequest(); // Dashboard ko refresh karein
+            setRefreshKey(k => k + 1); // Is component ko bhi refresh karein
         } catch (err) {
             alert(`Failed to ${status} request.`);
         }
@@ -92,7 +94,7 @@ const AddUdhaarForm = ({ customer, onNewUdhaar }) => {
             const config = { headers: { 'x-auth-token': token } };
             const body = { customerId: customer.id, amount: parseFloat(amount), description };
             await axios.post('http://localhost:5000/api/transactions/add-offchain', body, config);
-            alert(`Successfully added udhaar for ${customer.name}.`);
+            alert(`Successfully added udhaar for ${customer.name || 'this customer'}.`);
             onNewUdhaar();
             setAmount('');
             setDescription('');
@@ -238,7 +240,6 @@ function ShopkeeperDashboard() {
             <h2 className="text-3xl font-bold text-cyan-400">Shopkeeper Dashboard</h2>
             <div>
                 <h3 className="text-2xl font-semibold text-fuchsia-400 mb-4">Pending Collateral Requests</h3>
-                {/* Yahan naya component istemal kiya gaya hai */}
                 <PendingRequestsView onUpdateRequest={handleRefreshData} />
             </div>
             <div>
