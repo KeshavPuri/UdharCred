@@ -7,7 +7,7 @@ import "./CollateralManager.sol";
 /**
  * @title UdhaarChannel
  * @author Keshav
- * @notice Manages credit channels, including normal and forced settlements.
+ * @notice Manages credit channels, including settlements and withdrawals.
  */
 contract UdhaarChannel {
     struct Channel {
@@ -29,6 +29,8 @@ contract UdhaarChannel {
     event ChannelOpened(bytes32 indexed channelId, address indexed shopkeeper, address indexed customer, uint256 collateralAmount);
     event ChannelClosed(bytes32 indexed channelId, uint256 finalBalance);
     event ChannelForceSettled(bytes32 indexed channelId, address indexed shopkeeper, address indexed customer);
+    event UnusedCollateralWithdrawn(bytes32 indexed channelId, address indexed customer, uint256 amount);
+
 
     constructor(address _collateralManagerAddress, address _creditScoreAddress) {
         collateralManager = CollateralManager(_collateralManagerAddress);
@@ -76,7 +78,7 @@ contract UdhaarChannel {
 
         emit ChannelClosed(channelId, finalBalance);
     }
-
+    
     function forceSettle(address customer, uint256 finalBalance, bytes calldata customerSignature) public {
         address shopkeeper = msg.sender;
         bytes32 channelId = getChannelId(shopkeeper, customer);
@@ -101,7 +103,31 @@ contract UdhaarChannel {
 
         emit ChannelForceSettled(channelId, shopkeeper, customer);
     }
+    
+    function withdrawFromChannel(address shopkeeper, uint256 amountToWithdraw, uint256 currentDebt, bytes calldata customerSignature) public {
+        address customer = msg.sender;
+        bytes32 channelId = getChannelId(shopkeeper, customer);
+        Channel storage channel = channels[channelId];
+        
+        require(channel.isOpen, "Channel is not open");
+        
+        bytes32 messageHash = getSettlementHash(channelId, currentDebt, channel.nonce);
+        address signer = recoverSigner(messageHash, customerSignature);
+        require(signer == customer, "Invalid customer signature");
 
+        uint256 unusedCollateral = channel.collateralLocked - currentDebt;
+        require(amountToWithdraw <= unusedCollateral, "Withdrawal amount exceeds unused collateral");
+
+        channel.collateralLocked -= amountToWithdraw;
+        channel.nonce++;
+
+        collateralManager.withdrawCollateral(customer, amountToWithdraw);
+
+        emit UnusedCollateralWithdrawn(channelId, customer, amountToWithdraw);
+    }
+
+
+    // --- UTILITY FUNCTIONS ---
     function getChannelId(address shopkeeper, address customer) public pure returns (bytes32) {
         return keccak256(abi.encodePacked(shopkeeper, customer));
     }
@@ -126,17 +152,11 @@ contract UdhaarChannel {
     
     function _calculateUtilizationBonus(uint256 balance, uint256 collateral) internal pure returns (uint256) {
         if (collateral == 0) return 0;
-        
         uint256 utilizationRatio = (balance * 100) / collateral;
-
-        if (utilizationRatio < 25) {
-            return 150;
-        } else if (utilizationRatio < 50) {
-            return 100;
-        } else if (utilizationRatio < 75 ) {
-            return 50;
-        } else {
-            return 10;
-        }
+        if (utilizationRatio < 25) return 150;
+        if (utilizationRatio < 50) return 100;
+        if (utilizationRatio < 75 ) return 50;
+        return 10;
     }
 }
+

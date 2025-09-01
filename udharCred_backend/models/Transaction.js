@@ -18,20 +18,20 @@ const TransactionSchema = new Schema({
     },
     description: {
         type: String,
-        default: '' // Udhaar ke saamaan ki detail ke liye
+        default: 'N/A' // Udhaar ke saamaan ki detail ke liye
     },
     type: {
         type: String,
         required: true,
-        enum: ['credit', 'return', 'collateral']
+        enum: ['credit', 'return', 'collateral', 'collateral_withdrawal']
     },
     status: {
         type: String,
-        enum: ['pending', 'approved', 'rejected', 'completed', 'refunded'],
+        // **UPDATED**: 'pending_signature' aur 'settled' ko list mein joda gaya hai
+        enum: ['pending', 'approved', 'rejected', 'completed', 'refunded', 'settled', 'pending_signature'],
         default: 'pending'
     }
 }, { 
-    // Yeh option automatically 'createdAt' aur 'updatedAt' fields add kar deta hai
     timestamps: true 
 });
 

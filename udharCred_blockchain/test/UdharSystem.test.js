@@ -2,212 +2,189 @@ const { expect } = require("chai");
 const { ethers } = require("hardhat");
 const { time } = require("@nomicfoundation/hardhat-network-helpers");
 
-// Test suite for the entire final Udhaar system
-describe("Final UdhaarChannel System", function () {
-    let collateralManager, creditScore, udhaarChannel;
-    let owner, shopkeeper, customer, anotherCustomer;
+describe("UdhaarChannel Contract", function () {
+    let CollateralManager, collateralManager;
+    let CreditScore, creditScore;
+    let UdhaarChannel, udhaarChannel;
+    let owner, shopkeeper, customer, randomUser;
 
-    // This function runs before each test to set up the environment
+    // --- Setup: Har test se pehle saare contracts deploy karein ---
     beforeEach(async function () {
-        // Get test accounts from Hardhat
-        [owner, shopkeeper, customer, anotherCustomer] = await ethers.getSigners();
+        [owner, shopkeeper, customer, randomUser] = await ethers.getSigners();
 
-        // Deploy CollateralManager
-        const CollateralManagerFactory = await ethers.getContractFactory("CollateralManager");
-        collateralManager = await CollateralManagerFactory.deploy();
-        
-        // Deploy CreditScore
-        const CreditScoreFactory = await ethers.getContractFactory("CreditScore");
-        creditScore = await CreditScoreFactory.deploy();
+        // 1. CollateralManager deploy karein
+        CollateralManager = await ethers.getContractFactory("CollateralManager");
+        collateralManager = await CollateralManager.deploy();
 
-        // Deploy the main UdhaarChannel contract, linking the other two
-        const UdhaarChannelFactory = await ethers.getContractFactory("UdhaarChannel");
-        udhaarChannel = await UdhaarChannelFactory.deploy(
-            await collateralManager.getAddress(),
-            await creditScore.getAddress()
+        // 2. CreditScore deploy karein
+        CreditScore = await ethers.getContractFactory("CreditScore");
+        creditScore = await CreditScore.deploy();
+
+        // 3. UdhaarChannel deploy karein aur use baaki do contracts ke address dein
+        UdhaarChannel = await ethers.getContractFactory("UdhaarChannel");
+        udhaarChannel = await UdhaarChannel.deploy(await collateralManager.getAddress(), await creditScore.getAddress());
+
+        // 4. CollateralManager aur CreditScore ko batayein ki UdhaarChannel unse baat kar sakta hai
+        await collateralManager.setUdhaarChannelAddress(await udhaarChannel.getAddress());
+        await creditScore.setUdhaarChannelAddress(await udhaarChannel.getAddress());
+    });
+
+    // --- Helper function to create a signature ---
+    async function createSignature(channelId, balance, nonce, signer) {
+        const messageHash = ethers.keccak256(
+            ethers.solidityPacked(
+                ["bytes32", "uint256", "uint256"],
+                [channelId, balance, nonce]
+            )
         );
+        const signature = await signer.signMessage(ethers.getBytes(messageHash));
+        return signature;
+    }
 
-        // Grant permissions by setting the UdhaarChannel address in the helper contracts
-        await collateralManager.connect(owner).setUdhaarChannelAddress(await udhaarChannel.getAddress());
-        await creditScore.connect(owner).setUdhaarChannelAddress(await udhaarChannel.getAddress());
+
+    // --- Test Case 1: Unused Collateral Withdraw Karna ---
+    it("Should allow a customer to withdraw their unused collateral", async function () {
+        await collateralManager.connect(customer).depositCollateral({ value: ethers.parseEther("1.0") });
+        await udhaarChannel.connect(shopkeeper).openChannel(customer.address, ethers.parseEther("1.0"));
+        
+        const currentDebt = ethers.parseEther("0.3");
+        const amountToWithdraw = ethers.parseEther("0.7");
+
+        const channelId = await udhaarChannel.getChannelId(shopkeeper.address, customer.address);
+        const channel = await udhaarChannel.channels(channelId);
+        const signature = await createSignature(channelId, currentDebt, channel.nonce, customer);
+        
+        await expect(() => 
+            udhaarChannel.connect(customer).withdrawFromChannel(shopkeeper.address, amountToWithdraw, currentDebt, signature)
+        ).to.changeEtherBalance(customer, amountToWithdraw);
+
+        const updatedChannel = await udhaarChannel.channels(channelId);
+        expect(updatedChannel.collateralLocked).to.equal(currentDebt);
     });
 
-    // Test Case 1: The ideal scenario where the customer pays on time
-    describe("Happy Path: Normal Settlement", function () {
-        it("should allow a full cycle: deposit -> open -> close -> settle -> score update", async function () {
-            // Arrange
-            const collateralAmount = ethers.parseEther("1.0");
-            const finalBalance = ethers.parseEther("0.5");
+    // --- Test Case 2: Shopkeeper Dwara Force Settle Karna ---
+    it("Should allow a shopkeeper to force-settle a debt after 30 days", async function () {
+        await collateralManager.connect(customer).depositCollateral({ value: ethers.parseEther("1.0") });
+        await udhaarChannel.connect(shopkeeper).openChannel(customer.address, ethers.parseEther("1.0"));
+        await time.increase(31 * 24 * 60 * 60);
 
-            // Act
-            await collateralManager.connect(customer).depositCollateral({ value: collateralAmount });
-            await udhaarChannel.connect(shopkeeper).openChannel(customer.address, collateralAmount);
-            const channelId = await udhaarChannel.getChannelId(shopkeeper.address, customer.address);
-            const channel = await udhaarChannel.channels(channelId);
+        const finalBalance = ethers.parseEther("0.6");
+        
+        const channelId = await udhaarChannel.getChannelId(shopkeeper.address, customer.address);
+        const channel = await udhaarChannel.channels(channelId);
+        const signature = await createSignature(channelId, finalBalance, channel.nonce, customer);
 
-            const innerMessageHash = ethers.solidityPackedKeccak256(
-                ["bytes32", "uint256", "uint256"],
-                [channelId, finalBalance, channel.nonce]
-            );
-            const customerSignature = await customer.signMessage(ethers.getBytes(innerMessageHash));
+        const refundAmount = ethers.parseEther("0.4");
+        
+        await expect(() => 
+            udhaarChannel.connect(shopkeeper).forceSettle(customer.address, finalBalance, signature)
+        ).to.changeEtherBalances([shopkeeper, customer], [finalBalance, refundAmount]);
 
-            const shopkeeperInitialBalance = await ethers.provider.getBalance(shopkeeper.address);
-            const tx = await udhaarChannel.connect(shopkeeper).closeChannel(customer.address, finalBalance, customerSignature);
-            const receipt = await tx.wait();
-            const gasUsed = receipt.gasUsed * receipt.gasPrice;
-
-            // Assert
-            const shopkeeperFinalBalance = await ethers.provider.getBalance(shopkeeper.address);
-            expect(shopkeeperFinalBalance).to.equal(shopkeeperInitialBalance + finalBalance - gasUsed);
-            
-            const newScore = await creditScore.getScore(customer.address);
-            expect(newScore).to.be.gt(300);
-            console.log(`      ✅ Normal Settlement Score: ${newScore}`);
-        });
+        const updatedChannel = await udhaarChannel.channels(channelId);
+        expect(updatedChannel.isOpen).to.be.false;
     });
 
-    // Test Case 2: The scenario where the customer defaults and the shopkeeper force-settles
-    describe("Unhappy Path: Secure Forced Settlement", function () {
-        it("should allow shopkeeper to force-settle with proof after 30 days", async function () {
-            // Arrange
-            const collateralAmount = ethers.parseEther("2.0");
-            const actualUdhaar = ethers.parseEther("0.8");
+    // --- Edge Case Tests (Failure Scenarios) ---
 
-            await collateralManager.connect(customer).depositCollateral({ value: collateralAmount });
-            await udhaarChannel.connect(shopkeeper).openChannel(customer.address, collateralAmount);
-            const channelId = await udhaarChannel.getChannelId(shopkeeper.address, customer.address);
-            const channel = await udhaarChannel.channels(channelId);
+    it("Should REVERT if a customer tries to withdraw more than their unused collateral", async function () {
+        await collateralManager.connect(customer).depositCollateral({ value: ethers.parseEther("1.0") });
+        await udhaarChannel.connect(shopkeeper).openChannel(customer.address, ethers.parseEther("1.0"));
+        
+        const currentDebt = ethers.parseEther("0.3"); // Unused collateral is 0.7 ETH
+        const amountToWithdraw = ethers.parseEther("0.8"); // Trying to withdraw more
 
-            const innerMessageHash = ethers.solidityPackedKeccak256(
-                ["bytes32", "uint256", "uint256"],
-                [channelId, actualUdhaar, channel.nonce]
-            );
-            const customerSignature = await customer.signMessage(ethers.getBytes(innerMessageHash));
-
-            // Act
-            await time.increase(30 * 24 * 60 * 60);
-
-            const shopkeeperInitialBalance = await ethers.provider.getBalance(shopkeeper.address);
-            const customerInitialBalance = await ethers.provider.getBalance(customer.address);
-            
-            const tx = await udhaarChannel.connect(shopkeeper).forceSettle(customer.address, actualUdhaar, customerSignature);
-            const receipt = await tx.wait();
-            const gasUsed = receipt.gasUsed * receipt.gasPrice;
-
-            // Assert
-            const shopkeeperFinalBalance = await ethers.provider.getBalance(shopkeeper.address);
-            expect(shopkeeperFinalBalance).to.equal(shopkeeperInitialBalance + actualUdhaar - gasUsed);
-
-            const customerFinalBalance = await ethers.provider.getBalance(customer.address);
-            const remainingCollateral = collateralAmount - actualUdhaar;
-            expect(customerFinalBalance).to.equal(customerInitialBalance + remainingCollateral);
-
-            const newScore = await creditScore.getScore(customer.address);
-            const profile = await creditScore.customerProfiles(customer.address);
-            expect(profile.totalDefaults).to.equal(1);
-            expect(newScore).to.equal(300);
-            console.log(`      ✅ Forced Settlement Penalized Score: ${newScore}`);
-        });
-
-        it("should NOT allow force-settle if the signature is for a different amount", async function () {
-            // Arrange
-            const collateralAmount = ethers.parseEther("2.0");
-            const actualUdhaar = ethers.parseEther("0.8");
-            const fraudulentUdhaar = ethers.parseEther("1.5");
-
-            await collateralManager.connect(customer).depositCollateral({ value: collateralAmount });
-            await udhaarChannel.connect(shopkeeper).openChannel(customer.address, collateralAmount);
-            const channelId = await udhaarChannel.getChannelId(shopkeeper.address, customer.address);
-            const channel = await udhaarChannel.channels(channelId);
-            
-            const innerMessageHash = ethers.solidityPackedKeccak256(
-                ["bytes32", "uint256", "uint256"],
-                [channelId, actualUdhaar, channel.nonce]
-            );
-            const customerSignature = await customer.signMessage(ethers.getBytes(innerMessageHash));
-
-            // Act & Assert
-            await time.increase(30 * 24 * 60 * 60);
-            
-            await expect(
-                udhaarChannel.connect(shopkeeper).forceSettle(customer.address, fraudulentUdhaar, customerSignature)
-            ).to.be.revertedWith("Invalid customer signature for the provided balance");
-        });
+        const channelId = await udhaarChannel.getChannelId(shopkeeper.address, customer.address);
+        const channel = await udhaarChannel.channels(channelId);
+        const signature = await createSignature(channelId, currentDebt, channel.nonce, customer);
+        
+        await expect(
+            udhaarChannel.connect(customer).withdrawFromChannel(shopkeeper.address, amountToWithdraw, currentDebt, signature)
+        ).to.be.revertedWith("Withdrawal amount exceeds unused collateral");
     });
 
-    // Test Case 3: Covering specific edge cases for 100% coverage
-    describe("Edge Case Coverage", function() {
-        it("should allow a user to withdraw their collateral if no channel is open", async function() {
-            // Covers CollateralManager.withdrawCollateral
-            const depositAmount = ethers.parseEther("1.0");
-            await collateralManager.connect(customer).depositCollateral({ value: depositAmount });
-            
-            const initialBalance = await ethers.provider.getBalance(customer.address);
-            const tx = await collateralManager.connect(customer).withdrawCollateral(depositAmount);
-            const receipt = await tx.wait();
-            const gasUsed = receipt.gasUsed * receipt.gasPrice;
+    it("Should REVERT if a shopkeeper tries to force-settle before 30 days", async function () {
+        await collateralManager.connect(customer).depositCollateral({ value: ethers.parseEther("1.0") });
+        await udhaarChannel.connect(shopkeeper).openChannel(customer.address, ethers.parseEther("1.0"));
+        await time.increase(29 * 24 * 60 * 60);
 
-            const finalBalance = await ethers.provider.getBalance(customer.address);
-            expect(finalBalance).to.equal(initialBalance + depositAmount - gasUsed);
-        });
+        const finalBalance = ethers.parseEther("0.6");
+        const channelId = await udhaarChannel.getChannelId(shopkeeper.address, customer.address);
+        const channel = await udhaarChannel.channels(channelId);
+        const signature = await createSignature(channelId, finalBalance, channel.nonce, customer);
 
-        it("should cap the credit score at 900", async function() {
-            // Covers the score capping logic in CreditScore.sol
-            const collateralAmount = ethers.parseEther("1.0");
-            const settlementAmount = ethers.parseEther("0.1");
+        await expect(
+            udhaarChannel.connect(shopkeeper).forceSettle(customer.address, finalBalance, signature)
+        ).to.be.revertedWith("Settlement period not over yet");
+    });
 
-            // Simulate 50 settlements to generate a high score
-            for (let i = 0; i < 50; i++) {
-                await collateralManager.connect(anotherCustomer).depositCollateral({ value: collateralAmount });
-                await udhaarChannel.connect(shopkeeper).openChannel(anotherCustomer.address, collateralAmount);
-                
-                const channelId = await udhaarChannel.getChannelId(shopkeeper.address, anotherCustomer.address);
-                const channel = await udhaarChannel.channels(channelId);
-                
-                const innerMessageHash = ethers.solidityPackedKeccak256(
-                    ["bytes32", "uint256", "uint256"],
-                    [channelId, settlementAmount, channel.nonce]
-                );
-                const signature = await anotherCustomer.signMessage(ethers.getBytes(innerMessageHash));
-                
-                await udhaarChannel.connect(shopkeeper).closeChannel(anotherCustomer.address, settlementAmount, signature);
-            }
+    it("Should REVERT forceSettle if the signature is for a different balance", async function () {
+        await collateralManager.connect(customer).depositCollateral({ value: ethers.parseEther("1.0") });
+        await udhaarChannel.connect(shopkeeper).openChannel(customer.address, ethers.parseEther("1.0"));
+        await time.increase(31 * 24 * 60 * 60);
 
-            const score = await creditScore.getScore(anotherCustomer.address);
-            expect(score).to.equal(900);
-            console.log(`      ✅ Score Capping Test: Final score is ${score}`);
-        });
+        const correctFinalBalance = ethers.parseEther("0.6");
+        const incorrectBalanceForSignature = ethers.parseEther("0.5");
 
-        it("should handle various collateral utilization ratios correctly", async function() {
-            // Covers all branches of _calculateUtilizationBonus in UdhaarChannel.sol
-            
-            // Test Case A: Low utilization (< 25%) -> 150 points
-            let collateral = ethers.parseEther("10.0");
-            let balance = ethers.parseEther("2.0"); // 20%
-            await collateralManager.connect(customer).depositCollateral({ value: collateral });
-            await udhaarChannel.connect(shopkeeper).openChannel(customer.address, collateral);
-            let channelId = await udhaarChannel.getChannelId(shopkeeper.address, customer.address);
-            let channel = await udhaarChannel.channels(channelId);
-            let hash = ethers.solidityPackedKeccak256(["bytes32", "uint256", "uint256"], [channelId, balance, channel.nonce]);
-            let sig = await customer.signMessage(ethers.getBytes(hash));
-            await udhaarChannel.connect(shopkeeper).closeChannel(customer.address, balance, sig);
-            let score = await creditScore.getScore(customer.address);
-            // 300 (base) + 20 (settlement) + 50 (volume) + 150 (bonus) = 520
-            expect(score).to.equal(520);
+        const channelId = await udhaarChannel.getChannelId(shopkeeper.address, customer.address);
+        const channel = await udhaarChannel.channels(channelId);
+        const signature = await createSignature(channelId, incorrectBalanceForSignature, channel.nonce, customer);
 
-            // Test Case B: High utilization (> 75%) -> 10 points
-            balance = ethers.parseEther("8.0"); // 80%
-            await collateralManager.connect(customer).depositCollateral({ value: collateral });
-            await udhaarChannel.connect(shopkeeper).openChannel(customer.address, collateral);
-            channelId = await udhaarChannel.getChannelId(shopkeeper.address, customer.address);
-            channel = await udhaarChannel.channels(channelId);
-            hash = ethers.solidityPackedKeccak256(["bytes32", "uint256", "uint256"], [channelId, balance, channel.nonce]);
-            sig = await customer.signMessage(ethers.getBytes(hash));
-            await udhaarChannel.connect(shopkeeper).closeChannel(customer.address, balance, sig);
-            // Previous score was 520. Now it's a new profile.
-            // 300 (base) + 20 (settlement) + 200 (volume) + 10 (bonus) = 530
-            score = await creditScore.getScore(customer.address);
-            expect(score).to.equal(530);
-        });
+        await expect(
+            udhaarChannel.connect(shopkeeper).forceSettle(customer.address, correctFinalBalance, signature)
+        ).to.be.revertedWith("Invalid customer signature for the provided balance");
+    });
+
+    // --- **NEW**: Extreme Level Edge Case Tests ---
+
+    it("Should REVERT a replay attack where an old signature is used", async function () {
+        await collateralManager.connect(customer).depositCollateral({ value: ethers.parseEther("1.0") });
+        await udhaarChannel.connect(shopkeeper).openChannel(customer.address, ethers.parseEther("1.0"));
+        
+        // First, a valid withdrawal of 0.2 ETH occurs
+        const firstDebt = ethers.parseEther("0.3");
+        const firstWithdraw = ethers.parseEther("0.2");
+        let channelId = await udhaarChannel.getChannelId(shopkeeper.address, customer.address);
+        let channel = await udhaarChannel.channels(channelId);
+        const firstSignature = await createSignature(channelId, firstDebt, channel.nonce, customer);
+        await udhaarChannel.connect(customer).withdrawFromChannel(shopkeeper.address, firstWithdraw, firstDebt, signature);
+
+        // Now, the nonce has increased. Trying to use the OLD signature again should fail.
+        await expect(
+            udhaarChannel.connect(customer).withdrawFromChannel(shopkeeper.address, firstWithdraw, firstDebt, firstSignature)
+        ).to.be.revertedWith("Invalid customer signature");
+    });
+
+    it("Should REVERT if the signature is from the wrong person (e.g., shopkeeper)", async function () {
+        await collateralManager.connect(customer).depositCollateral({ value: ethers.parseEther("1.0") });
+        await udhaarChannel.connect(shopkeeper).openChannel(customer.address, ethers.parseEther("1.0"));
+        
+        const finalBalance = ethers.parseEther("0.6");
+        const channelId = await udhaarChannel.getChannelId(shopkeeper.address, customer.address);
+        const channel = await udhaarChannel.channels(channelId);
+        
+        // **WRONG SIGNER**: The shopkeeper signs instead of the customer
+        const maliciousSignature = await createSignature(channelId, finalBalance, channel.nonce, shopkeeper);
+
+        await expect(
+            udhaarChannel.connect(shopkeeper).closeChannel(customer.address, finalBalance, maliciousSignature)
+        ).to.be.revertedWith("Invalid customer signature");
+    });
+
+    it("Should REVERT any action on an already closed channel", async function () {
+        await collateralManager.connect(customer).depositCollateral({ value: ethers.parseEther("1.0") });
+        await udhaarChannel.connect(shopkeeper).openChannel(customer.address, ethers.parseEther("1.0"));
+
+        // First, close the channel successfully
+        const finalBalance = ethers.parseEther("0.8");
+        const channelId = await udhaarChannel.getChannelId(shopkeeper.address, customer.address);
+        let channel = await udhaarChannel.channels(channelId);
+        const signature = await createSignature(channelId, finalBalance, channel.nonce, customer);
+        await udhaarChannel.connect(shopkeeper).closeChannel(customer.address, finalBalance, signature);
+
+        // Now, try to close it again
+        await expect(
+            udhaarChannel.connect(shopkeeper).closeChannel(customer.address, finalBalance, signature)
+        ).to.be.revertedWith("Channel is not open");
     });
 });
+

@@ -1,11 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
-/**
- * @title CollateralManager
- * @author Keshav
- * @notice This contract handles the locking and settlement of ETH collateral.
- * Funds are held in escrow and can only be moved by the UdhaarChannel contract upon settlement.
- */
+
 
 contract CollateralManager {
     mapping(address => uint256) public collateralBalances;
@@ -30,19 +25,23 @@ contract CollateralManager {
         _;
     }
 
+    // Customer is contract mein paisa daalta hai
     function depositCollateral() public payable {
         require(msg.value > 0, "Deposit amount must be greater than zero");
         collateralBalances[msg.sender] += msg.value;
         emit CollateralDeposited(msg.sender, msg.value);
     }
 
-    function withdrawCollateral(uint256 amount) public {
-        require(amount <= collateralBalances[msg.sender], "Insufficient collateral");
-        collateralBalances[msg.sender] -= amount;
-        payable(msg.sender).transfer(amount);
-        emit CollateralWithdrawn(msg.sender, amount);
+    // --- **UPDATED**: Ab yeh function sirf UdhaarChannel hi call kar sakta hai ---
+    // Isse customer channel open hone ke baad direct paisa nahi nikaal paayega
+    function withdrawCollateral(address customer, uint256 amount) public onlyUdhaarChannel {
+        require(amount <= collateralBalances[customer], "Insufficient collateral");
+        collateralBalances[customer] -= amount;
+        payable(customer).transfer(amount);
+        emit CollateralWithdrawn(customer, amount);
     }
 
+    // Yeh function UdhaarChannel call karta hai jab udhaar settle hota hai
     function settleFunds(address customer, address shopkeeper, uint256 amountToShopkeeper) public onlyUdhaarChannel {
         uint256 customerBalance = collateralBalances[customer];
         require(amountToShopkeeper <= customerBalance, "Settlement amount exceeds collateral");
@@ -65,4 +64,3 @@ contract CollateralManager {
         udhaarChannelAddress = _channelAddress;
     }
 }
-
