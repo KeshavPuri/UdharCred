@@ -96,9 +96,7 @@ const RejectedRequests = ({ onWithdraw, markAsRefunded, refreshKey }) => {
             await markAsRefunded(txId);
         }
     };
-
     if (requests.length === 0) return null;
-
     return (
         <div className="mt-8">
              <h3 className="text-2xl font-semibold text-amber-400 mb-4">Action Required: Rejected Requests</h3>
@@ -172,7 +170,6 @@ const PendingUdhaarRequests = ({ onUpdate, refreshKey }) => {
     };
 
     if (requests.length === 0) return null;
-
     return (
         <div className="mt-8">
              <h3 className="text-2xl font-semibold text-yellow-400 mb-4">Action Required: Pending Udhaar Approvals</h3>
@@ -205,7 +202,8 @@ const UnusedCollateralManager = ({ onUpdate, refreshKey }) => {
         const fetchOpenChannels = async () => {
             const token = localStorage.getItem('token');
             const config = { headers: { 'x-auth-token': token } };
-            const res = await axios.get('http://localhost:5000/api/my-open-channels', config);
+            // **FIX**: Sahi URL ka istemal
+            const res = await axios.get('http://localhost:5000/api/transactions/my-open-channels', config);
             setOpenChannels(res.data);
         };
         fetchOpenChannels();
@@ -220,7 +218,6 @@ const UnusedCollateralManager = ({ onUpdate, refreshKey }) => {
                     <div key={ch.shopkeeper._id} className="bg-gray-800 p-4 rounded-lg">
                         <p className="font-bold text-white">Channel with: {ch.shopkeeper.username}</p>
                         <p className="font-semibold text-green-300">Available to Withdraw: {ch.unusedCollateral.toFixed(5)} ETH</p>
-                        {/* Yahan har channel ke liye ek alag withdraw form add kiya ja sakta hai */}
                     </div>
                 ))}
             </div>
@@ -235,14 +232,14 @@ const TransactionHistory = ({ refreshKey }) => {
         const fetchHistory = async () => {
             const token = localStorage.getItem('token');
             const config = { headers: { 'x-auth-token': token } };
-            const res = await axios.get('http://localhost:5000/api/my-history', config);
+            // **FIX**: Sahi URL ka istemal
+            const res = await axios.get('http://localhost:5000/api/transactions/my-history', config);
             setHistory(res.data);
         };
         fetchHistory();
     }, [refreshKey]);
 
     if (history.length === 0) return null;
-
     return (
         <div className="mt-8">
             <h3 className="text-2xl font-semibold text-cyan-400 mb-4">Your Transaction History</h3>

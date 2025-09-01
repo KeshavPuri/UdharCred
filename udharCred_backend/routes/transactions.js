@@ -385,10 +385,20 @@ router.put('/settle-debt/:customerId', auth, async (req, res) => {
     }
 });
 
+// **NEW**: This route was missing. It provides the latest channel state for signing.
 router.get('/channel-state/:shopkeeperId/:customerId', auth, async (req, res) => {
     const { shopkeeperId, customerId } = req.params;
-    const state = await getOrCreateChannelState(shopkeeperId, customerId);
-    res.json(state);
+    // Basic security check: ensure the request is for the logged-in user if they are the customer
+    if (req.user.role === 'customer' && req.user.id !== customerId) {
+        return res.status(403).json({ msg: 'Forbidden' });
+    }
+    try {
+        const state = await getOrCreateChannelState(shopkeeperId, customerId);
+        res.json(state);
+    } catch (err) {
+        res.status(500).send('Server Error');
+    }
 });
 
 module.exports = router;
+
