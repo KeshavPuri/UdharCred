@@ -120,7 +120,7 @@ const RejectedRequests = ({ onWithdraw, markAsRefunded, refreshKey }) => {
     );
 };
 
-// --- Sub-Component: Pending Udhaar Requests ko Sign Karne ke liye ---
+// --- **NEW**: Sub-Component: Pending Udhaar Requests ko Sign Karne ke liye ---
 const PendingUdhaarRequests = ({ onUpdate, refreshKey }) => {
     const [requests, setRequests] = useState([]);
     const [signingId, setSigningId] = useState(null);
@@ -153,13 +153,15 @@ const PendingUdhaarRequests = ({ onUpdate, refreshKey }) => {
             const stateRes = await axios.get(`http://localhost:5000/api/transactions/channel-state/${tx.shopkeeperId._id}`, config);
             const { latestBalance, latestNonce } = stateRes.data;
 
-            const newBalance = (latestBalance || 0) + tx.amount;
+            const latestBalanceInWei = ethers.toBigInt(latestBalance || '0');
+            const currentTxAmountInEth = tx.amount / ETH_TO_INR_RATE;
+            const currentTxAmountInWei = ethers.parseEther(currentTxAmountInEth.toString());
+            const newBalanceInWei = latestBalanceInWei + currentTxAmountInWei;
             
             const udhaarChannelContract = new ethers.Contract(UDHAAR_CHANNEL_ADDRESS, UDHAAR_CHANNEL_ABI, signer);
             const channelId = await udhaarChannelContract.getChannelId(tx.shopkeeperId.walletAddress, await signer.getAddress());
             
-            // **FINAL FIX**: Hum contract ke `getSettlementHash` ka istemal karenge
-            const messageHash = await udhaarChannelContract.getSettlementHash(channelId, ethers.parseUnits(newBalance.toString(), 'wei'), (latestNonce || 0) + 1);
+            const messageHash = await udhaarChannelContract.getSettlementHash(channelId, newBalanceInWei, (latestNonce || 0) + 1);
             const signature = await signer.signMessage(ethers.getBytes(messageHash));
             
             await axios.put(`http://localhost:5000/api/transactions/approve-udhaar/${tx._id}`, { signature }, config);
@@ -223,14 +225,11 @@ const ChannelManager = ({ channel, onUpdate }) => {
             const stateRes = await axios.get(`http://localhost:5000/api/transactions/channel-state/${channel.shopkeeper._id}`, config);
             const { latestBalance, latestNonce } = stateRes.data;
             
-            // **FINAL FIX**: Udhaar (jo INR mein hai) ko pehle ETH mein, fir WEI mein convert karein
-            const currentDebtInEth = (latestBalance || 0) / ETH_TO_INR_RATE;
-            const currentDebtInWei = ethers.parseEther(currentDebtInEth.toString());
+            const currentDebtInWei = ethers.toBigInt(latestBalance || '0');
             
             const udhaarChannelContract = new ethers.Contract(UDHAAR_CHANNEL_ADDRESS, UDHAAR_CHANNEL_ABI, signer);
             const channelId = await udhaarChannelContract.getChannelId(channel.shopkeeper.walletAddress, await signer.getAddress());
             
-            // **FINAL FIX**: Contract ke `getSettlementHash` ka istemal karein
             const messageHash = await udhaarChannelContract.getSettlementHash(channelId, currentDebtInWei, (latestNonce || 0));
             const signature = await signer.signMessage(ethers.getBytes(messageHash));
 
@@ -300,7 +299,7 @@ const UnusedCollateralManager = ({ onUpdate, refreshKey }) => {
 };
 
 
-// --- Sub-Component: Poori Transaction History Dikhane ke liye ---
+// --- **NEW**: Sub-Component: Poori Transaction History Dikhane ke liye ---
 const TransactionHistory = ({ refreshKey }) => {
     const [history, setHistory] = useState([]);
      useEffect(() => {
