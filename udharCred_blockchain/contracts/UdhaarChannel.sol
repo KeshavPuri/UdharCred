@@ -4,11 +4,6 @@ pragma solidity ^0.8.20;
 import "./CreditScore.sol";
 import "./CollateralManager.sol";
 
-/**
- * @title UdhaarChannel
- * @author Keshav
- * @notice Manages credit channels, including settlements and withdrawals.
- */
 contract UdhaarChannel {
     struct Channel {
         address shopkeeper;
@@ -132,13 +127,18 @@ contract UdhaarChannel {
         return keccak256(abi.encodePacked(shopkeeper, customer));
     }
 
+    // **FIX**: Is function se special prefix hata diya gaya hai.
+    // Ab yeh sirf data ka hash banayega.
     function getSettlementHash(bytes32 channelId, uint256 finalBalance, uint256 nonce) public pure returns (bytes32) {
-        return keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", keccak256(abi.encodePacked(channelId, finalBalance, nonce))));
+        return keccak256(abi.encodePacked(channelId, finalBalance, nonce));
     }
 
-    function recoverSigner(bytes32 messageHash, bytes memory signature) internal pure returns (address) {
+    // **FIX**: Yeh function ab hash banane se pehle prefix jodega.
+    // Yeh Ethers.js ke `signMessage` ke saath 100% match karta hai.
+    function recoverSigner(bytes32 dataHash, bytes memory signature) internal pure returns (address) {
+        bytes32 prefixedHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", dataHash));
         (bytes32 r, bytes32 s, uint8 v) = splitSignature(signature);
-        return ecrecover(messageHash, v, r, s);
+        return ecrecover(prefixedHash, v, r, s);
     }
 
     function splitSignature(bytes memory sig) internal pure returns (bytes32 r, bytes32 s, uint8 v) {
@@ -159,4 +159,3 @@ contract UdhaarChannel {
         return 10;
     }
 }
-

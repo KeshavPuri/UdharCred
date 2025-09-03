@@ -23,6 +23,7 @@ const formatINR = (amountInINR) => {
 const PendingRequestsView = ({ onUpdateRequest, refreshKey }) => {
     const [requests, setRequests] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [processingId, setProcessingId] = useState(null);
 
     useEffect(() => {
         const fetchRequests = async () => {
@@ -41,15 +42,32 @@ const PendingRequestsView = ({ onUpdateRequest, refreshKey }) => {
         fetchRequests();
     }, [refreshKey]);
 
-    const handleRequest = async (id, status) => {
+    const handleRequest = async (req, status) => {
+        setProcessingId(req._id);
         try {
             const token = localStorage.getItem('token');
             const config = { headers: { 'x-auth-token': token } };
-            await axios.put(`http://localhost:5000/api/transactions/${status}/${id}`, {}, config);
+
+            if (status === 'approve') {
+                if (!window.ethereum) throw new Error("MetaMask is not installed.");
+                const provider = new ethers.BrowserProvider(window.ethereum);
+                const signer = await provider.getSigner();
+                const udhaarChannelContract = new ethers.Contract(UDHAAR_CHANNEL_ADDRESS, UDHAAR_CHANNEL_ABI, signer);
+
+                const tx = await udhaarChannelContract.openChannel(req.customerId.walletAddress, ethers.parseEther(req.amount.toString()));
+                await tx.wait();
+                alert("Channel opened successfully on the blockchain!");
+            }
+            
+            await axios.put(`http://localhost:5000/api/transactions/${status}/${req._id}`, {}, config);
             alert(`Request has been ${status}.`);
             onUpdateRequest();
+
         } catch (err) {
-            alert(`Failed to ${status} request.`);
+            console.error(`Failed to ${status} request:`, err);
+            alert(`Failed to ${status} request: ` + (err.reason || err.message));
+        } finally {
+            setProcessingId(null);
         }
     };
 
@@ -65,8 +83,20 @@ const PendingRequestsView = ({ onUpdateRequest, refreshKey }) => {
                     <div className="flex justify-between items-center">
                         <p className="text-cyan-400 font-semibold">{req.amount} ETH ({formatEthToINR(req.amount)})</p>
                         <div className="flex gap-2">
-                            <button onClick={() => handleRequest(req._id, 'approve')} className="bg-green-600 hover:bg-green-700 text-white font-bold py-1 px-3 rounded">Approve</button>
-                            <button onClick={() => handleRequest(req._id, 'reject')} className="bg-red-600 hover:bg-red-700 text-white font-bold py-1 px-3 rounded">Reject</button>
+                            <button 
+                                onClick={() => handleRequest(req, 'approve')} 
+                                disabled={processingId === req._id}
+                                className="bg-green-600 hover:bg-green-700 text-white font-bold py-1 px-3 rounded disabled:bg-gray-500"
+                            >
+                                {processingId === req._id ? '...' : 'Approve'}
+                            </button>
+                            <button 
+                                onClick={() => handleRequest(req, 'reject')} 
+                                disabled={processingId === req._id}
+                                className="bg-red-600 hover:bg-red-700 text-white font-bold py-1 px-3 rounded disabled:bg-gray-500"
+                            >
+                                {processingId === req._id ? '...' : 'Reject'}
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -109,7 +139,7 @@ const AddUdhaarForm = ({ customer, onNewUdhaar }) => {
 
     return (
         <form onSubmit={handleSubmit} className="mt-4 p-4 border-t border-gray-700 space-y-4">
-            <h4 className="text-lg font-semibold text-cyan-400">Add New Udhaar (Off-chain)</h4>
+            <h4 className="text-lg font-semibold text-cyan-400">Add New Udhaar (Request Signature)</h4>
             <div>
                 <label htmlFor="udhaarAmount" className="block text-sm font-medium text-gray-400">Amount in INR (₹)</label>
                 <input type="text" id="udhaarAmount" value={amount} onChange={(e) => setAmount(e.target.value)}
@@ -175,9 +205,8 @@ const CustomerDetailView = ({ customer, onBack, onNewUdhaar }) => {
             const token = localStorage.getItem('token');
             const config = { headers: { 'x-auth-token': token } };
             
-            // Zaroori: Backend se aakhri signed state laayein
-            const stateRes = await axios.get(`http://localhost:5000/api/channel-state/${customer.id}/${signer.id}`, config);
-            const { latestBalance, latestSignature, latestNonce } = stateRes.data;
+            const stateRes = await axios.get(`http://localhost:5000/api/transactions/channel-state/${signer.id}/${customer.id}`, config);
+            const { latestBalance, latestSignature } = stateRes.data;
 
             if (!latestSignature) {
                 throw new Error("Could not find the last signature from the customer. Force settle cannot proceed without it.");

@@ -120,7 +120,7 @@ const RejectedRequests = ({ onWithdraw, markAsRefunded, refreshKey }) => {
     );
 };
 
-// --- **NEW**: Sub-Component: Pending Udhaar Requests ko Sign Karne ke liye ---
+// --- Sub-Component: Pending Udhaar Requests ko Sign Karne ke liye ---
 const PendingUdhaarRequests = ({ onUpdate, refreshKey }) => {
     const [requests, setRequests] = useState([]);
     const [signingId, setSigningId] = useState(null);
@@ -142,21 +142,24 @@ const PendingUdhaarRequests = ({ onUpdate, refreshKey }) => {
     const handleSignAndApprove = async (tx) => {
         setSigningId(tx._id);
         try {
+            if (!tx.shopkeeperId || !tx.shopkeeperId.walletAddress) throw new Error("Shopkeeper wallet address is missing.");
             if (!window.ethereum) throw new Error("MetaMask not installed.");
+
             const provider = new ethers.BrowserProvider(window.ethereum);
             const signer = await provider.getSigner();
             const token = localStorage.getItem('token');
             const config = { headers: { 'x-auth-token': token } };
             
-            // **FINAL FIX**: URL ko theek kiya gaya hai, ab ismein '/transactions/' shaamil hai
-            const stateRes = await axios.get(`http://localhost:5000/api/transactions/channel-state/${tx.shopkeeperId._id}/${tx.customerId}`, config);
+            const stateRes = await axios.get(`http://localhost:5000/api/transactions/channel-state/${tx.shopkeeperId._id}`, config);
             const { latestBalance, latestNonce } = stateRes.data;
 
             const newBalance = (latestBalance || 0) + tx.amount;
             
             const udhaarChannelContract = new ethers.Contract(UDHAAR_CHANNEL_ADDRESS, UDHAAR_CHANNEL_ABI, signer);
             const channelId = await udhaarChannelContract.getChannelId(tx.shopkeeperId.walletAddress, await signer.getAddress());
-            const messageHash = ethers.keccak256(ethers.solidityPacked(["bytes32", "uint256", "uint256"], [channelId, ethers.parseUnits(newBalance.toString(), 'wei'), (latestNonce || 0)]));
+            
+            // **FINAL FIX**: Hum contract ke `getSettlementHash` ka istemal karenge
+            const messageHash = await udhaarChannelContract.getSettlementHash(channelId, ethers.parseUnits(newBalance.toString(), 'wei'), (latestNonce || 0) + 1);
             const signature = await signer.signMessage(ethers.getBytes(messageHash));
             
             await axios.put(`http://localhost:5000/api/transactions/approve-udhaar/${tx._id}`, { signature }, config);
@@ -196,7 +199,83 @@ const PendingUdhaarRequests = ({ onUpdate, refreshKey }) => {
     );
 };
 
-// --- **UPDATED**: Sub-Component: Unused Collateral ko Channel-wise Dikhane ke liye ---
+// --- **UPDATED**: Sub-Component: Unused Collateral ko Withdraw Karne ke liye ---
+const ChannelManager = ({ channel, onUpdate }) => {
+    const [amount, setAmount] = useState('');
+    const [isWithdrawing, setIsWithdrawing] = useState(false);
+    const [error, setError] = useState('');
+
+    const handleWithdraw = async (e) => {
+        e.preventDefault();
+        const amountToWithdraw = parseFloat(amount);
+        if (amountToWithdraw <= 0) return setError("Please enter a valid amount.");
+        if (amountToWithdraw > channel.unusedCollateral) return setError("Withdrawal amount exceeds available balance.");
+
+        setIsWithdrawing(true);
+        setError('');
+        try {
+            if (!window.ethereum) throw new Error("MetaMask not installed.");
+            const provider = new ethers.BrowserProvider(window.ethereum);
+            const signer = await provider.getSigner();
+            const token = localStorage.getItem('token');
+            const config = { headers: { 'x-auth-token': token } };
+
+            const stateRes = await axios.get(`http://localhost:5000/api/transactions/channel-state/${channel.shopkeeper._id}`, config);
+            const { latestBalance, latestNonce } = stateRes.data;
+            
+            // **FINAL FIX**: Udhaar (jo INR mein hai) ko pehle ETH mein, fir WEI mein convert karein
+            const currentDebtInEth = (latestBalance || 0) / ETH_TO_INR_RATE;
+            const currentDebtInWei = ethers.parseEther(currentDebtInEth.toString());
+            
+            const udhaarChannelContract = new ethers.Contract(UDHAAR_CHANNEL_ADDRESS, UDHAAR_CHANNEL_ABI, signer);
+            const channelId = await udhaarChannelContract.getChannelId(channel.shopkeeper.walletAddress, await signer.getAddress());
+            
+            // **FINAL FIX**: Contract ke `getSettlementHash` ka istemal karein
+            const messageHash = await udhaarChannelContract.getSettlementHash(channelId, currentDebtInWei, (latestNonce || 0));
+            const signature = await signer.signMessage(ethers.getBytes(messageHash));
+
+            const tx = await udhaarChannelContract.withdrawFromChannel(channel.shopkeeper.walletAddress, ethers.parseEther(amount), currentDebtInWei, signature);
+            await tx.wait();
+            alert("Withdrawal successful!");
+
+            await axios.post('http://localhost:5000/api/transactions/record-withdrawal', { amount: amountToWithdraw, shopkeeperId: channel.shopkeeper._id }, config);
+            onUpdate();
+            setAmount('');
+        } catch (err) {
+            console.error("Withdraw Unused Collateral Failed:", err);
+            setError(err.reason || err.message || "An error occurred.");
+        } finally {
+            setIsWithdrawing(false);
+        }
+    };
+
+    return (
+        <div className="bg-gray-800 p-4 rounded-lg">
+            <p className="font-bold text-white">Channel with: {channel.shopkeeper.username}</p>
+            <p className="font-semibold text-green-300">Available to Withdraw: {channel.unusedCollateral.toFixed(5)} ETH</p>
+            {channel.unusedCollateral > 0 && (
+                <form onSubmit={handleWithdraw} className="mt-4 flex items-end gap-2">
+                    <div className="flex-grow">
+                        <label htmlFor={`withdraw-${channel.shopkeeper._id}`} className="sr-only">Amount</label>
+                        <input
+                            id={`withdraw-${channel.shopkeeper._id}`}
+                            type="text"
+                            value={amount}
+                            onChange={(e) => setAmount(e.target.value)}
+                            placeholder="ETH Amount"
+                            className="w-full bg-gray-700 border-gray-600 rounded-md py-2 px-3 text-white"
+                        />
+                    </div>
+                    <button type="submit" disabled={isWithdrawing} className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg disabled:bg-gray-500">
+                        {isWithdrawing ? '...' : 'Withdraw'}
+                    </button>
+                </form>
+            )}
+            {error && <p className="text-red-500 text-sm mt-2">{error}</p>}
+        </div>
+    );
+};
+
 const UnusedCollateralManager = ({ onUpdate, refreshKey }) => {
     const [openChannels, setOpenChannels] = useState([]);
     useEffect(() => {
@@ -211,21 +290,17 @@ const UnusedCollateralManager = ({ onUpdate, refreshKey }) => {
 
     if (openChannels.length === 0) return null;
     return (
-         <div className="mt-8">
+        <div className="mt-8">
             <h3 className="text-2xl font-semibold text-green-400 mb-4">Manage Unused Collateral</h3>
             <div className="space-y-4">
-                {openChannels.map(ch => (
-                    <div key={ch.shopkeeper._id} className="bg-gray-800 p-4 rounded-lg">
-                        <p className="font-bold text-white">Channel with: {ch.shopkeeper.username}</p>
-                        <p className="font-semibold text-green-300">Available to Withdraw: {ch.unusedCollateral.toFixed(5)} ETH</p>
-                    </div>
-                ))}
+                {openChannels.map(ch => <ChannelManager key={ch.shopkeeper._id} channel={ch} onUpdate={onUpdate} />)}
             </div>
         </div>
     );
 };
 
-// --- **NEW**: Sub-Component: Poori Transaction History Dikhane ke liye ---
+
+// --- Sub-Component: Poori Transaction History Dikhane ke liye ---
 const TransactionHistory = ({ refreshKey }) => {
     const [history, setHistory] = useState([]);
      useEffect(() => {
@@ -359,3 +434,4 @@ function CustomerDashboard() {
 }
 
 export default CustomerDashboard;
+
